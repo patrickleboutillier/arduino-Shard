@@ -10,7 +10,10 @@ ShardImpl::ShardImpl(){
   _ignore = 0 ;
   _active = 0 ;  
   _break = 0 ;
-  _mon.active = 0 ;
+  _mon_idx = 0  ;
+  for (byte i = 0 ; i < SHARD_MAX_MONITORS ; i++){
+    _mon[i].active = 0 ;
+  }
   _cmdidx = 0 ;
 }
 
@@ -66,17 +69,19 @@ void ShardImpl::loop(){
 
 
 void ShardImpl::run_monitors(){
-  if (_mon.active) {
-    int ret = execute_cmd(_mon.cmd, true) ;
-    if (ret != _mon.result){
-      // TODO: cleanup/make more efficient.
-      Serial.print("monitor(") ;
-      Serial.print(_mon.cmd) ;
-      Serial.print("): ") ;
-      Serial.print(_mon.result) ;
-      Serial.print(" -> ") ;
-      Serial.println(ret) ;
-      _mon.result = ret ;   
+  for (byte i = 0 ; i < SHARD_MAX_MONITORS ; i++){
+    if (_mon[i].active) {
+      int ret = execute_cmd(_mon[i].cmd, true) ;
+      if (ret != _mon[i].result){
+        // TODO: cleanup/make more efficient.
+        Serial.print("monitor(") ;
+        Serial.print(_mon[i].cmd) ;
+        Serial.print("): ") ;
+        Serial.print(_mon[i].result) ;
+        Serial.print(" -> ") ;
+        Serial.println(ret) ;
+        _mon[i].result = ret ;   
+      }
     }
   }
 }
@@ -129,6 +134,10 @@ int ShardImpl::execute_cmd(const char *cmdstr, bool silent){
   
   if ((strncmp(cmd, "mdr", 3) == 0)||(strncmp(cmd, "mar", 3) == 0)){
     // Monitor mode
+    if (_mon_idx = SHARD_MAX_CMD_LEN-1){
+        Serial.println("All available monitors are used.") ;
+        return 0 ;
+    }
     int ret = execute_cmd(cmd+1, true) ;
     if (ret != -1){ // Command succeeded
       // Place command in monitor mode
@@ -141,8 +150,10 @@ int ShardImpl::execute_cmd(const char *cmdstr, bool silent){
     return 0 ;
   } 
   else if (strcmp(cmd, "clm") == 0){
+    for (byte i = 0 ; i < SHARD_MAX_MONITORS ; i++){
+      _mon[i].active = 0 ;    
+    }
     Serial.println("Monitors cleared.") ;
-    _mon.active = 0 ;    
     return 0 ;
   }
   else if (strcmp(cmd, "break") == 0){
@@ -181,9 +192,9 @@ int ShardImpl::execute_cmd(const char *cmdstr, bool silent){
 
 
 void ShardImpl::monitor_cmd(const char *cmdstr, int result){
-  _mon.active = 1 ;
-  strcpy(_mon.cmd, cmdstr) ;
-  _mon.result = result ;  
+  _mon[_mon_idx].active = 1 ;
+  strcpy(_mon[_mon_idx].cmd, cmdstr) ;
+  _mon[_mon_idx].result = result ;  
 }
 
 

@@ -4,7 +4,8 @@
 #include "Arduino.h"
 
 
-#define SHARD_MAX_CMD_LEN  8
+#define SHARD_MAX_CMD_LEN   8
+#define SHARD_MAX_MONITORS  4
 
 
 typedef struct ShardMonitor {
@@ -20,13 +21,14 @@ class ShardImpl {
     void begin(char eol = '\n') ;
     void loop() ;   
   private:
-    ShardMonitor _mon ;
+    byte _mon_idx ;
+    ShardMonitor _mon[SHARD_MAX_MONITORS] ;
     bool _ignore ;
     bool _break ;
     bool _active ;
     char _eol ;
     bool _echo_cmd ;
-    int _cmdidx ;
+    byte _cmdidx ;
     char _cmd[SHARD_MAX_CMD_LEN] ;
     void process_char(char c) ;
     int execute_cmd(const char *cmdstr, bool silent) ;
