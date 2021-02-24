@@ -13,12 +13,13 @@ ShardImpl::ShardImpl(){
   _mon_idx = 0  ;
   for (byte i = 0 ; i < SHARD_MAX_MONITORS ; i++){
     _mon[i].active = 0 ;
+    _mon[i].fptr = NULL ;
   }
   _cmdidx = 0 ;
 }
 
 
-void ShardImpl::begin(char eol = '\n'){
+void ShardImpl::begin(char eol){
   if (Serial){
     _active = 1 ;
   }
@@ -71,15 +72,26 @@ void ShardImpl::loop(){
 void ShardImpl::run_monitors(){
   for (byte i = 0 ; i < SHARD_MAX_MONITORS ; i++){
     if (_mon[i].active) {
-      int ret = execute_cmd(_mon[i].cmd, true) ;
+      int ret ;
+      if (_mon[i].fptr == NULL){
+        ret = execute_cmd(_mon[i].cmd, true) ;
+      } 
+      else {
+        ret = _mon[i].fptr(nullptr) ;
+      }
       if (ret != _mon[i].result){
         // TODO: cleanup/make more efficient.
-        Serial.print("monitor(") ;
-        Serial.print(_mon[i].cmd) ;
-        Serial.print("): ") ;
-        Serial.print(_mon[i].result) ;
-        Serial.print(" -> ") ;
-        Serial.println(ret) ;
+        char buf[64] ;
+        char bufi[8] ;
+        strcpy(buf, "mon#") ;
+        strcat(buf, itoa(i+1, bufi, 10)) ;
+        strcat(buf, "(") ;
+        strcat(buf, _mon[i].cmd) ;
+        strcat(buf, "): ") ;
+        strcat(buf, itoa(_mon[i].result, bufi, 10)) ;
+        strcat(buf, " -> ") ;
+        strcat(buf, itoa(ret, bufi, 10)) ;
+        Serial.println(buf) ;
         _mon[i].result = ret ;   
       }
     }
@@ -106,9 +118,9 @@ void ShardImpl::process_char(char c){
 
     if (strlen(_cmd) != 0){
       execute_cmd(_cmd, false) ;
-      prompt() ;
-      _cmdidx = 0 ;
     }
+    prompt() ;
+    _cmdidx = 0 ;
     
     return ;
   }
@@ -128,13 +140,24 @@ void ShardImpl::process_char(char c){
 }
 
 
+int ShardImpl::run(const char *cmdstr){
+  _cmdidx = 0 ;
+  for (int i = 0 ; i < strlen(cmdstr) ; i++){
+    if (cmdstr[i] != _eol){
+      process_char(cmdstr[i]) ;
+    }
+  }
+  process_char(_eol) ;
+}
+
+
 int ShardImpl::execute_cmd(const char *cmdstr, bool silent){
   char cmd[SHARD_MAX_CMD_LEN] ;
   strcpy(cmd, cmdstr) ;
   
   if ((strncmp(cmd, "mdr", 3) == 0)||(strncmp(cmd, "mar", 3) == 0)){
     // Monitor mode
-    if (_mon_idx = SHARD_MAX_CMD_LEN-1){
+    if (_mon_idx == SHARD_MAX_MONITORS){
         Serial.println("All available monitors are used.") ;
         return 0 ;
     }
@@ -154,6 +177,7 @@ int ShardImpl::execute_cmd(const char *cmdstr, bool silent){
       _mon[i].active = 0 ;    
     }
     Serial.println("Monitors cleared.") ;
+    _mon_idx = 0 ;
     return 0 ;
   }
   else if (strcmp(cmd, "break") == 0){
@@ -195,6 +219,29 @@ void ShardImpl::monitor_cmd(const char *cmdstr, int result){
   _mon[_mon_idx].active = 1 ;
   strcpy(_mon[_mon_idx].cmd, cmdstr) ;
   _mon[_mon_idx].result = result ;  
+  _mon_idx++ ;
+}
+
+
+int ShardImpl::_monitor_lambda(const char *name, int (*fptr)(void*)){
+  for (byte i = 0 ; i < SHARD_MAX_MONITORS ; i++){
+    if ((_mon[i].active)&&(_mon[i].fptr != NULL)&&(strcmp(_mon[i].cmd, name) == 0)){
+      // Monitor with same name already registered, skip
+      return 0 ;
+    }    
+  }
+
+  if (_mon_idx < SHARD_MAX_MONITORS){
+    _mon[_mon_idx].active = 1 ;
+    _mon[_mon_idx].fptr = fptr ;
+    strncpy(_mon[_mon_idx].cmd, name, 8) ;
+    int ret = fptr(nullptr) ;
+    _mon[_mon_idx].result = ret ;
+    _mon_idx++ ;
+    return 1 ;
+  }
+
+  return 0 ;
 }
 
 
@@ -232,7 +279,7 @@ uint8_t getPinMode(uint8_t pin){
 void ShardImpl::ls(){
     Serial.println("PIN\tINPUT/OUTPUT\tMODE") ;
     for (int i = 0 ; i < NUM_DIGITAL_PINS ; i++){
-      char buf[SHARD_MAX_CMD_LEN] ;
+      char buf[64] ;
       strcpy(buf, "pin-") ;
       strcat(buf, (i >= A0 ? "A" : "")) ;
       char bufi[8] ;
@@ -243,7 +290,7 @@ void ShardImpl::ls(){
       strcat(buf, "DIGITAL\t") ;
             
       int mode = getPinMode(i) ;
-      char *c = "INPUT" ;
+      const char *c = "INPUT" ;
       switch(mode){
         case OUTPUT:
           c = "OUTPUT" ;
@@ -271,7 +318,7 @@ const char *_helptxt[] = {
 
 
 void ShardImpl::help(){
-  for (int i = 0 ; i < (sizeof(_helptxt)/2) ; i++){
+  for (int i = 0 ; i < (int)(sizeof(_helptxt)/2) ; i++){
     Serial.println(_helptxt[i]) ;
   }
 }
@@ -282,7 +329,7 @@ int ShardImpl::parse_int(const char *cint, byte maxlen){
     return -1 ;
   }
   
-  char *x = cint ;
+  const char *x = cint ;
   char buf[8] ;
   byte i = 0 ;
   while ((*x >= '0')&&(*x <= '9')){
@@ -310,7 +357,7 @@ int ShardImpl::parse_pin(const char *cpin, bool analog_only){
     return -1 ;
   }
   
-  char *x = cpin ;
+  const char *x = cpin ;
   int pin = 0 ;
   if (*x == 'A'){
     pin = A0 ;
